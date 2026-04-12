@@ -1,0 +1,118 @@
+name: MLOps Pipeline - 2022bcs0172
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          pip install dvc dvc-s3 scikit-learn pandas numpy mlflow boto3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Pull data from S3 with DVC
+        run: dvc pull
+
+      - name: Run 1 - V1 RandomForest base
+        env:
+          RUN_NUMBER: "1"
+          MODEL_TYPE: "RandomForest"
+          N_ESTIMATORS: "100"
+          MAX_DEPTH: "None"
+          USE_ALL_FEATURES: "true"
+          DATASET_VERSION: "v1"
+          MLFLOW_TRACKING_URI: "file:./mlruns"
+        run: python src/train.py
+
+      - name: Run 2 - V1 RandomForest tuned
+        env:
+          RUN_NUMBER: "2"
+          MODEL_TYPE: "RandomForest"
+          N_ESTIMATORS: "200"
+          MAX_DEPTH: "10"
+          USE_ALL_FEATURES: "true"
+          DATASET_VERSION: "v1"
+          MLFLOW_TRACKING_URI: "file:./mlruns"
+        run: python src/train.py
+
+      - name: Run 3 - V2 RandomForest base
+        env:
+          RUN_NUMBER: "3"
+          MODEL_TYPE: "RandomForest"
+          N_ESTIMATORS: "100"
+          MAX_DEPTH: "None"
+          USE_ALL_FEATURES: "true"
+          DATASET_VERSION: "v2"
+          MLFLOW_TRACKING_URI: "file:./mlruns"
+        run: python src/train.py
+
+      - name: Run 4 - V2 RandomForest feature selection
+        env:
+          RUN_NUMBER: "4"
+          MODEL_TYPE: "RandomForest"
+          N_ESTIMATORS: "100"
+          MAX_DEPTH: "None"
+          USE_ALL_FEATURES: "false"
+          DATASET_VERSION: "v2"
+          MLFLOW_TRACKING_URI: "file:./mlruns"
+        run: python src/train.py
+
+      - name: Run 5 - V2 GradientBoosting feature selection
+        env:
+          RUN_NUMBER: "5"
+          MODEL_TYPE: "GradientBoosting"
+          N_ESTIMATORS: "100"
+          MAX_DEPTH: "3"
+          USE_ALL_FEATURES: "false"
+          DATASET_VERSION: "v2"
+          MLFLOW_TRACKING_URI: "file:./mlruns"
+        run: python src/train.py
+
+      - name: Write summary
+        run: |
+          echo "## MLOps Pipeline Results - Kaustubh Bhalerao (2022bcs0172)" >> $GITHUB_STEP_SUMMARY
+          echo "| Run | Dataset | Model | Features | RMSE | R2 |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|---------|-------|----------|------|----|" >> $GITHUB_STEP_SUMMARY
+          python -c "
+          import json
+          d = json.load(open('app/artifacts/metrics.json'))
+          print(f'| Run {d[\"run_number\"]} | {d[\"dataset_version\"]} | {d[\"model_type\"]} | {d[\"feature_set\"]} | {d[\"rmse\"]} | {d[\"r2\"]} |')
+          " >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload metrics artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: metrics-${{ github.run_number }}
+          path: app/artifacts/metrics.json
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: kaustubh2022bcs0172docker
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        run: |
+          docker build -t kaustubh2022bcs0172docker/2022bcs0172-mlops:${{ github.run_number }} \
+                       -t kaustubh2022bcs0172docker/2022bcs0172-mlops:latest .
+          docker push kaustubh2022bcs0172docker/2022bcs0172-mlops:${{ github.run_number }}
+          docker push kaustubh2022bcs0172docker/2022bcs0172-mlops:latest
