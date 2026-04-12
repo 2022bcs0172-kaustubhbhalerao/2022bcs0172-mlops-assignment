@@ -1,0 +1,4 @@
+[core]
+    remote = s3remote_kaustubh
+['remote "s3remote_kaustubh"']
+    url = s3://dvc-lab8-kaustubh/mlops-assignment
